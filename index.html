@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#0E0F13">
+<title>ПОСЛЕ ПЕПЛА — прототип</title>
+<style>
+  :root{
+    --bg:#0E0F13; --panel:#171922; --panel2:#1F2230;
+    --ink:#E8E6DE; --dim:#8B8F9E;
+    --amber:#FFD166; --rust:#E4572E; --toxic:#A7C957; --rad:#B14ADB;
+    --safe-b: env(safe-area-inset-bottom, 0px);
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent; margin:0; padding:0}
+  html,body{height:100%; overscroll-behavior:none}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+    display:flex; flex-direction:column; max-width:480px; margin:0 auto;
+    user-select:none; touch-action:manipulation;
+  }
+  /* ===== верхняя панель (только чтение) ===== */
+  header{padding:10px 14px 6px; flex:0 0 auto}
+  .row{display:flex; gap:8px; align-items:center; justify-content:space-between}
+  .hero{font-size:13px; color:var(--dim)}
+  .hero b{color:var(--amber); font-size:15px}
+  .bar{height:10px; border-radius:5px; background:var(--panel2); overflow:hidden; position:relative; margin-top:4px}
+  .bar>i{position:absolute; inset:0; transform-origin:left; transition:transform .3s}
+  .hp>i{background:linear-gradient(90deg,#c0392b,#E4572E)}
+  .rad>i{background:linear-gradient(90deg,#5b2c8d,var(--rad))}
+  .lbl{font-size:11px; color:var(--dim); display:flex; justify-content:space-between}
+  /* ===== нарратив ===== */
+  main{flex:1 1 auto; overflow-y:auto; padding:10px 14px; display:flex; flex-direction:column; gap:10px}
+  .log{background:var(--panel); border-left:3px solid var(--amber); border-radius:10px;
+       padding:12px 14px; font-size:16px; line-height:1.45; min-height:96px}
+  .log.hit{border-left-color:var(--rust)}
+  .log.loot{border-left-color:var(--toxic)}
+  .log.rad{border-left-color:var(--rad)}
+  .chips{display:flex; flex-wrap:wrap; gap:6px}
+  .chip{background:var(--panel2); border-radius:14px; padding:4px 10px; font-size:12px; color:var(--dim)}
+  .chip b{color:var(--ink)}
+  /* ===== thumb-zone: действия внизу ===== */
+  nav{flex:0 0 auto; padding:8px 10px calc(10px + var(--safe-b)); display:grid; gap:8px;
+      grid-template-columns:1fr 1fr}
+  button{
+    min-height:56px; border:none; border-radius:14px; font-size:16px; font-weight:600;
+    background:var(--panel2); color:var(--ink); cursor:pointer; transition:transform .06s;
+  }
+  button:active{transform:scale(.96)}
+  button.primary{background:var(--amber); color:#141414; grid-column:span 2; min-height:64px; font-size:18px}
+  button.danger{background:var(--rust); color:#fff}
+  button.heal{background:var(--toxic); color:#141414}
+  button:disabled{opacity:.35}
+  small{display:block; font-weight:400; font-size:11px; opacity:.7}
+  /* экран выбора фракции */
+  .overlay{position:fixed; inset:0; background:var(--bg); z-index:9; display:flex;
+           flex-direction:column; justify-content:center; gap:10px; padding:20px 16px calc(20px + var(--safe-b)); max-width:480px; margin:0 auto}
+  .overlay h1{font-size:26px; color:var(--amber); text-align:center; margin-bottom:2px}
+  .overlay p{color:var(--dim); text-align:center; font-size:14px; margin-bottom:14px}
+  .overlay button{text-align:left; padding:14px 16px}
+</style>
+</head>
+<body>
+
+<div class="overlay" id="start">
+  <h1>ПОСЛЕ ПЕПЛА</h1>
+  <p>Серая Зона · 2047 · выбери фракцию</p>
+  <button onclick="pick('ведьма')">🜃 Ведьмы Каланды<small>крафт +25%, стартовая аптечка ×3</small></button>
+  <button onclick="pick('шестерня')">⚙ Лига Шестерни<small>торговля +20%, дозиметр (−1 рад/шаг)</small></button>
+  <button onclick="pick('орден')">✴ Орден Чистого Неба<small>+2 силы, урон в бою +15%</small></button>
+</div>
+
+<header>
+  <div class="row">
+    <div class="hero"><b id="name">Пепельник</b> · <span id="fac">—</span></div>
+    <div class="hero">Шаг <b id="step">0</b>/12 · 🧭 <b id="caps">0</b></div>
+  </div>
+  <div class="lbl"><span>Здоровье</span><span id="hpt"></span></div>
+  <div class="bar hp"><i id="hpbar"></i></div>
+  <div class="lbl"><span>☢ Радиация</span><span id="radt"></span></div>
+  <div class="bar rad"><i id="radbar"></i></div>
+</header>
+
+<main><div class="log" id="log">Добро пожаловать в Зону.</div>
+  <div class="chips" id="inv"></div>
+</main>
+
+<nav id="actions"></nav>
+
+<script>
+"use strict";
+const S={fac:null,hp:100,maxhp:100,rad:0,step:0,caps:0,potions:1,scrap:0,alive:true,inFight:null};
+const $=id=>document.getElementById(id);
+const rnd=n=>Math.floor(Math.random()*n);
+const buzz=(p)=>{ if(navigator.vibrate) navigator.vibrate(p); };
+
+const EVENTS=[
+ {t:"explore",w:5,run(){const l=["Ржавый автобус на обочине. Внутри аптечка.","Торговый автомат мёртв, но внутри монетки караванщиков.","Скелет в противогазе сжимает гермосумку."];
+   S.caps+=3+rnd(6); say(l[rnd(3)],"loot"); buzz(20);}},
+ {t:"anomaly",w:3,run(){const d=6+rnd(10); S.rad+=d; S.caps+=8+rnd(8);
+   say(`Аномалия «Жарка»: проскочил за припасами, поймал ${d} рад. Рад >80 открывает мутации!`,"rad"); buzz([15,40,15]);}},
+ {t:"fight",w:6,run(){const m=[["Слепой пёс",18],["Краб-дог",26],["Дрон караванщиков",22],["Пожиратель",34]];
+   const e=m[rnd(m.length)]; S.inFight={n:e[0],hp:e[1]};
+   say(`${e[0]} преграждает путь! (${e[1]} HP)`,"hit"); buzz(30);}},
+ {t:"mutant_gift",w:2,run(){if(S.rad>=50){S.maxhp+=10;S.hp+=10;say("Зона приняла тебя: мутация «Костяная броня» +10 макс. HP","rad");buzz([10,30,10,30]);}
+   else{S.scrap+=4;say("Пустой бункер: нашёл обломки ×4 (крафт на полном релизе)","loot");}}},
+ {t:"nothing",w:3,run(){say(["Ветер гоняет пепел. Тишина.","Следы каравана свернули в топь. Идёшь дальше.","Ночное небо без звёзд — слишком много пыли."][rnd(3)]);}},
+];
+const POOL=(()=>{let a=[];EVENTS.forEach(e=>{for(let i=0;i<e.w;i++)a.push(e)});return a})();
+
+function say(text,cls){const l=$("log");l.textContent=text;l.className="log "+(cls||"");}
+
+function pick(f){
+  S.fac=f; $("start").style.display="none";
+  $("fac").textContent={ведьма:"Ведьмы Каланды",шестерня:"Лига Шестерни",орден:"Орден Чистого Неба"}[f];
+  if(f==="ведьма")S.potions=3; if(f==="орден")S.str=2; if(f==="шестерня")S.geiger=true;
+  say("Маршрут проложен. Каждый тап «Идти» — один шаг. Выжившие возвращаются в Анклав.");
+  render();
+}
+
+function go(){
+  if(!S.alive)return;
+  S.step++; if(S.rad>0&&!S.geiger)S.rad-=0; // geiger handled below
+  if(S.geiger&&S.rad>0)S.rad=Math.max(0,S.rad-1);
+  if(S.step>12){return arrive();}
+  POOL[rnd(POOL.length)].run();
+  render();
+}
+
+function fight(kind){
+  const f=S.inFight; if(!f)return;
+  let dmg=kind==="attack"?8+rnd(9)+(S.str||0)+(S.fac==="орден"?3:0):0;
+  if(kind==="flee"){ if(rnd(2)){say("Отступил! Путь свободен.");S.inFight=null;}
+    else{const d=6+rnd(6);S.hp-=d;say(`Неудачный побег: −${d} HP.`,"hit");buzz(40);} return after(); }
+  if(kind==="rad"){ if(S.rad<40){return;} dmg=20+rnd(10); S.rad+=8; f.hp-=dmg;
+    say(`Мутантский удар из радиационного тумана! ${f.n} получил −${dmg}, но ты словил +8 рад.`,"rad"); buzz([15,40,15]);
+    if(f.hp<=0){S.scrap+=2+rnd(4);S.caps+=4+rnd(6);say(`${f.n} повержен! Лут собран.`,"loot");S.inFight=null;}
+    return after(); }
+  if(kind==="heal"){ if(S.potions<=0)return; S.potions--; S.hp=Math.min(S.maxhp,S.hp+30); say("Аптечка: +30 HP","loot"); return after(); }
+  f.hp-=dmg; buzz(30);
+  if(f.hp<=0){S.scrap+=2+rnd(4);S.caps+=4+rnd(6);say(`${f.n} повержен! Лут собран.`,"loot");S.inFight=null;return after();}
+  const d=4+rnd(8); S.hp-=d; say(`Ударил на ${d}. ${f.n} конттит на −${d} HP (осталось ${f.hp}).`,"hit");
+  after();
+}
+
+function after(){ if(S.hp<=0)return die(); render(); }
+
+function die(){ S.alive=false; buzz([60,80,60,80,200]);
+  say("Экспедиция потеряна. На полном релизе: «эвакуация» за половину стоимости лута.");
+  $("actions").innerHTML=`<button class="primary" onclick="location.reload()">Новая экспедиция</button>`;
+  render(true); }
+
+function arrive(){ S.alive=false;
+  const bonus=S.fac==="шестерня"?1.2:(S.fac==="ведьма"?1.1:1);
+  const gold=Math.round((S.caps+S.scrap*3)*bonus)+S.rad*2;
+  say(`Возвращение в Анклав! Зачёт: ${gold} крышек (бонус фракции применён). Радиация ${Math.round(S.rad)}% осталась с тобой.`,"loot");
+  buzz([20,30,20]);
+  $("actions").innerHTML=`<button class="primary" onclick="location.reload()">В Анклав → снова в Зону</button>`;
+  render(true); }
+
+function render(minimal){
+  $("step").textContent=S.step; $("caps").textContent=S.caps;
+  $("hpt").textContent=`${Math.max(0,Math.round(S.hp))}/${S.maxhp}`;
+  $("radt").textContent=Math.round(S.rad)+"%"+(S.rad>=80?" ⚡МУТАЦИЯ":"");
+  $("hpbar").style.transform=`scaleX(${Math.max(0,S.hp/S.maxhp)})`;
+  $("radbar").style.transform=`scaleX(${Math.min(1,S.rad/100)})`;
+  $("inv").innerHTML=[`🔩 обломки <b>${S.scrap}</b>`,`💊 аптечки <b>${S.potions}</b>`,`🧭 крышки <b>${S.caps}</b>`]
+    .map(t=>`<span class="chip">${t}</span>`).join("");
+  if(minimal||!S.alive)return;
+  const a=$("actions");
+  if(S.inFight){
+    a.innerHTML=`
+      <button class="danger" onclick="fight('attack')">⚔ Атака<small>${8+(S.str||0)}–16 урона</small></button>
+      <button class="heal" onclick="fight('heal')" ${S.potions?"":"disabled"}>💊 Аптечка<small>+30 HP</small></button>
+      <button onclick="fight('rad')" ${S.rad>=40?"":"disabled"}>☢ Мутация<small>нужно ≥40% рад</small></button>
+      <button onclick="fight('flee')">🏃 Отступить<small>50/50</small></button>`;
+  }else{
+    a.innerHTML=`<button class="primary" onclick="go()">🥾 ИДТИ ДАЛЬШЕ<small>следующий шаг маршрута</small></button>`;
+  }
+}
+render();
+</script>
+</body>
+</html>
